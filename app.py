@@ -38,6 +38,7 @@ with st.sidebar:
     date_window = st.select_slider("Date range", options=[90, 180, 365, 730], value=365, format_func=lambda x: f"{x} days")
     interval = st.selectbox("Bar interval", ["1d", "1h"], index=0)
     chart_style = st.radio("Price chart style", ["Candlestick", "Line"], horizontal=True)
+    hide_data_warnings = st.checkbox("Hide API/rate-limit warnings (demo)", value=True)
     run = st.button("Run Agentic Workflow", type="primary")
 
 st.info(f"Data source: **{provider_name}**. App will automatically use demo mode if API/data retrieval fails.")
@@ -50,8 +51,10 @@ if run:
 
     quotes, history_map, errors = manager.fetch_watchlist(symbols=symbols, days=date_window, interval=interval, asset_class=asset_class)
 
-    if errors:
+    if errors and not hide_data_warnings:
         st.warning("Some symbols failed to load: " + " | ".join(errors))
+    elif errors and hide_data_warnings:
+        st.caption("Some symbols could not be loaded. Warnings are hidden in demo mode.")
 
     if not history_map:
         st.error("Unable to load market data for requested symbols.")
@@ -93,8 +96,12 @@ if run:
         cols[3].metric("Market Cap", f"{q.market_cap:,.0f}" if q.market_cap else "N/A")
 
     st.subheader("Price Action")
-    st.plotly_chart(price_chart(processed[primary], primary, use_candles=(chart_style == "Candlestick")), use_container_width=True)
-    st.plotly_chart(volume_chart(processed[primary], primary), use_container_width=True)
+    p1, p2 = st.columns(2)
+    p1.plotly_chart(
+        price_chart(processed[primary], primary, use_candles=(chart_style == "Candlestick")),
+        use_container_width=True,
+    )
+    p2.plotly_chart(volume_chart(processed[primary], primary), use_container_width=True)
 
     st.subheader("Volatility and Risk")
     v1, v2 = st.columns(2)
