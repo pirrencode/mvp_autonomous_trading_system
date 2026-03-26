@@ -42,8 +42,8 @@ class AlphaVantageProvider(MarketDataProvider):
         return response.json()
 
     @st.cache_data(ttl=180)
-    def get_quote(_self, symbol: str, asset_class: str = "stocks") -> Quote:
-        data = _self._request({"function": "GLOBAL_QUOTE", "symbol": symbol})
+    def get_quote(self, symbol: str, asset_class: str = "stocks") -> Quote:
+        data = self._request({"function": "GLOBAL_QUOTE", "symbol": symbol})
         q = data.get("Global Quote", {})
         price = float(q.get("05. price", 0.0))
         change_pct = float(q.get("10. change percent", "0").replace("%", "") or 0.0)
@@ -51,8 +51,8 @@ class AlphaVantageProvider(MarketDataProvider):
         return Quote(symbol=symbol, price=price, change_pct=change_pct, volume=volume, market_cap=None)
 
     @st.cache_data(ttl=900)
-    def get_history(_self, symbol: str, days: int = 365, interval: str = "1d", asset_class: str = "stocks") -> pd.DataFrame:
-        data = _self._request({"function": "TIME_SERIES_DAILY_ADJUSTED", "symbol": symbol, "outputsize": "full"})
+    def get_history(self, symbol: str, days: int = 365, interval: str = "1d", asset_class: str = "stocks") -> pd.DataFrame:
+        data = self._request({"function": "TIME_SERIES_DAILY_ADJUSTED", "symbol": symbol, "outputsize": "full"})
         ts = data.get("Time Series (Daily)", {})
         if not ts:
             raise ValueError(f"No Alpha Vantage history returned for {symbol}")
@@ -75,7 +75,7 @@ class AlphaVantageProvider(MarketDataProvider):
 
 class YFinanceProvider(MarketDataProvider):
     @st.cache_data(ttl=120)
-    def get_quote(_self, symbol: str, asset_class: str = "stocks") -> Quote:
+    def get_quote(self, symbol: str, asset_class: str = "stocks") -> Quote:
         t = yf.Ticker(symbol)
         info = t.fast_info
         hist = t.history(period="2d", interval="1d")
@@ -92,7 +92,7 @@ class YFinanceProvider(MarketDataProvider):
         )
 
     @st.cache_data(ttl=600)
-    def get_history(_self, symbol: str, days: int = 365, interval: str = "1d", asset_class: str = "stocks") -> pd.DataFrame:
+    def get_history(self, symbol: str, days: int = 365, interval: str = "1d", asset_class: str = "stocks") -> pd.DataFrame:
         start = datetime.utcnow() - timedelta(days=days)
         df = yf.download(symbol, start=start, interval=interval, auto_adjust=True, progress=False)
         if df.empty:
@@ -107,7 +107,7 @@ class YFinanceProvider(MarketDataProvider):
 
 class DemoProvider(MarketDataProvider):
     @st.cache_data(ttl=3600)
-    def get_history(_self, symbol: str, days: int = 365, interval: str = "1d", asset_class: str = "stocks") -> pd.DataFrame:
+    def get_history(self, symbol: str, days: int = 365, interval: str = "1d", asset_class: str = "stocks") -> pd.DataFrame:
         rng = pd.date_range(end=pd.Timestamp.utcnow().normalize(), periods=days, freq="D")
         seed = abs(hash(symbol)) % (2**32)
         rs = np.random.RandomState(seed)
@@ -122,8 +122,8 @@ class DemoProvider(MarketDataProvider):
         return pd.DataFrame({"open": open_, "high": high, "low": low, "close": close, "volume": volume}, index=rng)
 
     @st.cache_data(ttl=600)
-    def get_quote(_self, symbol: str, asset_class: str = "stocks") -> Quote:
-        hist = _self.get_history(symbol, days=5)
+    def get_quote(self, symbol: str, asset_class: str = "stocks") -> Quote:
+        hist = self.get_history(symbol, days=5)
         price = float(hist["close"].iloc[-1])
         change_pct = float((hist["close"].iloc[-1] / hist["close"].iloc[-2] - 1) * 100)
         return Quote(symbol=symbol, price=price, change_pct=change_pct, volume=float(hist["volume"].iloc[-1]), market_cap=None)
