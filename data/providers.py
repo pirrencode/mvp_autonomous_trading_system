@@ -31,28 +31,88 @@ class MarketDataProvider(ABC):
         raise NotImplementedError
 
 
+@st.cache_data(ttl=180)
+def _alphavantage_quote_cached(api_key: str, symbol: str) -> Dict:
+    base = "https://www.alphavantage.co/query"
+    response = requests.get(base, params={"function": "GLOBAL_QUOTE", "symbol": symbol, "apikey": api_key}, timeout=20)
+    response.raise_for_status()
+    return response.json()
+
+
+@st.cache_data(ttl=900)
+def _alphavantage_history_cached(api_key: str, symbol: str) -> Dict:
+    base = "https://www.alphavantage.co/query"
+    response = requests.get(
+        base,
+        params={"function": "TIME_SERIES_DAILY_ADJUSTED", "symbol": symbol, "outputsize": "full", "apikey": api_key},
+        timeout=20,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+@st.cache_data(ttl=120)
+def _yfinance_quote_cached(symbol: str) -> Dict[str, float | None]:
+    t = yf.Ticker(symbol)
+    info = t.fast_info
+    hist = t.history(period="2d", interval="1d")
+    if len(hist) < 2:
+        change_pct = 0.0
+    else:
+        change_pct = ((hist["Close"].iloc[-1] / hist["Close"].iloc[-2]) - 1) * 100
+
+    return {
+        "price": float(info.get("lastPrice") or hist["Close"].iloc[-1]),
+        "change_pct": float(change_pct),
+        "volume": float(info.get("lastVolume") or 0),
+        "market_cap": float(info.get("marketCap")) if info.get("marketCap") else None,
+    }
+
+
+@st.cache_data(ttl=600)
+def _yfinance_history_cached(symbol: str, days: int, interval: str) -> pd.DataFrame:
+    start = datetime.utcnow() - timedelta(days=days)
+    df = yf.download(symbol, start=start, interval=interval, auto_adjust=True, progress=False)
+    if df.empty:
+        raise ValueError(f"No yfinance history for {symbol}")
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = [col[0].lower() for col in df.columns]
+    else:
+        df.columns = [col.lower() for col in df.columns]
+    df.index = pd.to_datetime(df.index).tz_localize(None)
+    return df[["open", "high", "low", "close", "volume"]]
+
+
+@st.cache_data(ttl=3600)
+def _demo_history_cached(symbol: str, days: int) -> pd.DataFrame:
+    rng = pd.date_range(end=pd.Timestamp.utcnow().normalize(), periods=days, freq="D")
+    seed = abs(hash(symbol)) % (2**32)
+    rs = np.random.RandomState(seed)
+    drift = 0.0003
+    vol = 0.02
+    rets = rs.normal(drift, vol, len(rng))
+    close = 100 * np.exp(np.cumsum(rets))
+    open_ = np.r_[close[0], close[:-1]] * (1 + rs.normal(0, 0.002, len(rng)))
+    high = np.maximum(open_, close) * (1 + np.abs(rs.normal(0, 0.01, len(rng))))
+    low = np.minimum(open_, close) * (1 - np.abs(rs.normal(0, 0.01, len(rng))))
+    volume = rs.randint(5e5, 5e6, len(rng))
+    return pd.DataFrame({"open": open_, "high": high, "low": low, "close": close, "volume": volume}, index=rng)
+
+
 class AlphaVantageProvider(MarketDataProvider):
     def __init__(self, api_key: str):
         self.api_key = api_key
 
-    def _request(self, params: Dict[str, str]) -> Dict:
-        base = "https://www.alphavantage.co/query"
-        response = requests.get(base, params={**params, "apikey": self.api_key}, timeout=20)
-        response.raise_for_status()
-        return response.json()
-
-    @st.cache_data(ttl=180)
     def get_quote(self, symbol: str, asset_class: str = "stocks") -> Quote:
-        data = self._request({"function": "GLOBAL_QUOTE", "symbol": symbol})
+        data = _alphavantage_quote_cached(self.api_key, symbol)
         q = data.get("Global Quote", {})
         price = float(q.get("05. price", 0.0))
         change_pct = float(q.get("10. change percent", "0").replace("%", "") or 0.0)
         volume = float(q.get("06. volume", 0.0) or 0.0)
         return Quote(symbol=symbol, price=price, change_pct=change_pct, volume=volume, market_cap=None)
 
-    @st.cache_data(ttl=900)
     def get_history(self, symbol: str, days: int = 365, interval: str = "1d", asset_class: str = "stocks") -> pd.DataFrame:
-        data = self._request({"function": "TIME_SERIES_DAILY_ADJUSTED", "symbol": symbol, "outputsize": "full"})
+        data = _alphavantage_history_cached(self.api_key, symbol)
         ts = data.get("Time Series (Daily)", {})
         if not ts:
             raise ValueError(f"No Alpha Vantage history returned for {symbol}")
@@ -74,54 +134,24 @@ class AlphaVantageProvider(MarketDataProvider):
 
 
 class YFinanceProvider(MarketDataProvider):
-    @st.cache_data(ttl=120)
     def get_quote(self, symbol: str, asset_class: str = "stocks") -> Quote:
-        t = yf.Ticker(symbol)
-        info = t.fast_info
-        hist = t.history(period="2d", interval="1d")
-        if len(hist) < 2:
-            change_pct = 0.0
-        else:
-            change_pct = ((hist["Close"].iloc[-1] / hist["Close"].iloc[-2]) - 1) * 100
+        data = _yfinance_quote_cached(symbol)
         return Quote(
             symbol=symbol,
-            price=float(info.get("lastPrice") or hist["Close"].iloc[-1]),
-            change_pct=float(change_pct),
-            volume=float(info.get("lastVolume") or 0),
-            market_cap=float(info.get("marketCap") or 0) if info.get("marketCap") else None,
+            price=float(data["price"]),
+            change_pct=float(data["change_pct"]),
+            volume=float(data["volume"] or 0),
+            market_cap=float(data["market_cap"]) if data["market_cap"] else None,
         )
 
-    @st.cache_data(ttl=600)
     def get_history(self, symbol: str, days: int = 365, interval: str = "1d", asset_class: str = "stocks") -> pd.DataFrame:
-        start = datetime.utcnow() - timedelta(days=days)
-        df = yf.download(symbol, start=start, interval=interval, auto_adjust=True, progress=False)
-        if df.empty:
-            raise ValueError(f"No yfinance history for {symbol}")
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = [col[0].lower() for col in df.columns]
-        else:
-            df.columns = [col.lower() for col in df.columns]
-        df.index = pd.to_datetime(df.index).tz_localize(None)
-        return df[["open", "high", "low", "close", "volume"]]
+        return _yfinance_history_cached(symbol, days, interval)
 
 
 class DemoProvider(MarketDataProvider):
-    @st.cache_data(ttl=3600)
     def get_history(self, symbol: str, days: int = 365, interval: str = "1d", asset_class: str = "stocks") -> pd.DataFrame:
-        rng = pd.date_range(end=pd.Timestamp.utcnow().normalize(), periods=days, freq="D")
-        seed = abs(hash(symbol)) % (2**32)
-        rs = np.random.RandomState(seed)
-        drift = 0.0003
-        vol = 0.02
-        rets = rs.normal(drift, vol, len(rng))
-        close = 100 * np.exp(np.cumsum(rets))
-        open_ = np.r_[close[0], close[:-1]] * (1 + rs.normal(0, 0.002, len(rng)))
-        high = np.maximum(open_, close) * (1 + np.abs(rs.normal(0, 0.01, len(rng))))
-        low = np.minimum(open_, close) * (1 - np.abs(rs.normal(0, 0.01, len(rng))))
-        volume = rs.randint(5e5, 5e6, len(rng))
-        return pd.DataFrame({"open": open_, "high": high, "low": low, "close": close, "volume": volume}, index=rng)
+        return _demo_history_cached(symbol, days)
 
-    @st.cache_data(ttl=600)
     def get_quote(self, symbol: str, asset_class: str = "stocks") -> Quote:
         hist = self.get_history(symbol, days=5)
         price = float(hist["close"].iloc[-1])
