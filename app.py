@@ -96,32 +96,30 @@ if run:
         cols[3].metric("Market Cap", f"{q.market_cap:,.0f}" if q.market_cap else "N/A")
 
     st.subheader("Price Action")
-    p1, p2 = st.columns(2)
+    p1, p2, p3 = st.columns(3)
+    vol_fig, dd_fig = risk_charts(processed[primary], primary)
     p1.plotly_chart(
         price_chart(processed[primary], primary, use_candles=(chart_style == "Candlestick")),
         use_container_width=True,
     )
     p2.plotly_chart(volume_chart(processed[primary], primary), use_container_width=True)
+    p3.plotly_chart(vol_fig, use_container_width=True)
 
-    st.subheader("Volatility and Risk")
-    v1, v2 = st.columns(2)
-    vol_fig, dd_fig = risk_charts(processed[primary], primary)
-    v1.plotly_chart(vol_fig, use_container_width=True)
-    v2.plotly_chart(dd_fig, use_container_width=True)
-    st.json(risk_map[primary])
-
-    st.subheader("Technical Signals")
-    t1, t2 = st.columns(2)
+    st.subheader("Risk and Technical Signals")
+    v1, v2, v3 = st.columns(3)
     rsi_fig, macd_fig = indicator_charts(processed[primary], primary)
-    t1.plotly_chart(rsi_fig, use_container_width=True)
-    t2.plotly_chart(macd_fig, use_container_width=True)
+    v1.plotly_chart(dd_fig, use_container_width=True)
+    v2.plotly_chart(rsi_fig, use_container_width=True)
+    v3.plotly_chart(macd_fig, use_container_width=True)
+    st.json(risk_map[primary])
     st.write(signal_map[primary])
 
     if len(processed) > 1:
         st.subheader("Comparative / Multi-Asset View")
-        c1, c2 = st.columns(2)
+        c1, c2, c3 = st.columns(3)
         c1.plotly_chart(normalized_performance(processed), use_container_width=True)
         c2.plotly_chart(correlation_heatmap(processed), use_container_width=True)
+        c3.plotly_chart(price_chart(processed[primary], primary, use_candles=False), use_container_width=True)
 
     st.subheader("AI Strategy Workspace")
     ticker_summary = build_ticker_summary(signal_map, risk_map, latest_map)
