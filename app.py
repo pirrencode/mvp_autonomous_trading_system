@@ -19,8 +19,8 @@ from data.providers import DataManager, resolve_provider
 
 
 st.set_page_config(page_title="Autonomous Trading System", layout="wide")
-st.title("🤖 Autonomous Trading System")
-st.caption("Agentic AI MVP for market analysis and trade planning")
+st.title("🤖 Autonomous Trading System Mk.1")
+st.caption("Agentic AI MVP for market analysis and trade planning Mk.1")
 
 cfg = load_config()
 provider, provider_name = resolve_provider(cfg.data_provider, cfg.alpha_vantage_api_key, cfg.finnhub_api_key)
